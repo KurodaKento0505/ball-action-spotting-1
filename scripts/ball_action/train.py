@@ -53,6 +53,7 @@ def train_ball_action(config: dict, save_dir: Path,
         pretrain_dir = action_experiments_dir / config["pretrain_action_experiment"]
     elif config["pretrain_ball_experiment"]:
         pretrain_dir = constants.experiments_dir / config["pretrain_ball_experiment"] / f"fold_{fold}"
+    print(pretrain_dir)
 
     if pretrain_dir:
         pretrain_model_path = get_best_model_path(pretrain_dir)

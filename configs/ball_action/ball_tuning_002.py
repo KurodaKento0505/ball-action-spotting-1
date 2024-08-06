@@ -70,7 +70,7 @@ config = dict(
         "prob": 0.25,
     },
     pretrain_action_experiment="",
-    pretrain_ball_experiment="ball_tuning_001",
+    pretrain_ball_experiment="ball_tuning_002",
     torch_compile={
         "backend": "inductor",
         "mode": "default",
