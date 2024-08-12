@@ -89,20 +89,18 @@ def detect_game(predictor: MultiDimStackerPredictor,
             t.update()
             ret, frame_np = cap.read()
             if ret:
-                # save
-                # cv2.imwrite('data/ball_action/detections/hsv_frame.png', hsv_frame)
-
-                # グレースケール変換
+                ################ 画像変換 ###################
+                '''# グレースケール変換
                 gray_frame = cv2.cvtColor(frame_np, cv2.COLOR_BGR2GRAY)
-
                 # 閾値処理（白いラインやボールを強調）
                 _, binary_frame = cv2.threshold(gray_frame, 200, 255, cv2.THRESH_BINARY)
-                
-                # カラーを元にした選手検出
+                # hsv変換
                 hsv_frame = cv2.cvtColor(frame_np, cv2.COLOR_BGR2HSV)
+                # save
+                # cv2.imwrite('data/ball_action/detections/hsv_frame.png', hsv_frame)'''
 
-                # ピッチ以外を黒色に
-                # 緑色の範囲を定義 (この範囲は調整が必要です)
+                ################ ピッチ以外を黒色に ################
+                '''# 緑色の範囲を定義 (この範囲は調整が必要です)
                 lower_green = np.array([30, 40, 40])
                 upper_green = np.array([90, 255, 255])
                 # 緑色のマスクを作成
@@ -117,41 +115,38 @@ def detect_game(predictor: MultiDimStackerPredictor,
                 cv2.drawContours(mask_with_contour, contours, -1, (255, 255, 255), thickness=cv2.FILLED)
                 # マスクの部分だけ元の画像を抽出（他は黒）
                 pitch = cv2.bitwise_and(frame_np, mask_with_contour)
-                cv2.imwrite('data/ball_action/detections/pitch.png', pitch)
+                cv2.imwrite('data/ball_action/detections/pitch.png', pitch)'''
 
-                # 白色（ラインやボール）のマスク
+                ################ 二値化 ################
+                '''# 白色（ラインやボール）のマスク
                 white_mask = cv2.inRange(hsv_frame, np.array([0, 0, 200]), np.array([180, 50, 255]))
-
                 # 色の範囲に基づいて選手のマスクを作成（例: 青色と赤色のユニフォーム）
                 blue_mask = cv2.inRange(hsv_frame, np.array([100, 150, 0]), np.array([140, 255, 255]))
                 red_mask = cv2.inRange(hsv_frame, np.array([0, 50, 50]), np.array([10, 255, 255]))
                 red_mask2 = cv2.inRange(hsv_frame, np.array([170, 50, 50]), np.array([180, 255, 255]))
                 player_mask = cv2.bitwise_or(blue_mask, cv2.bitwise_or(red_mask, red_mask2))
-
                 # 二値化されたライン、選手、ボールを1つのマスクに統合
                 combined_mask = cv2.bitwise_or(binary_frame, cv2.bitwise_or(white_mask, player_mask))
-
                 # モルフォロジー変換（ノイズ除去と形状強調）
                 kernel = np.ones((5, 5), np.uint8)
                 combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
-
                 # マスクを使って元のフレームをフィルタリング
-                filtered_frame = cv2.bitwise_and(frame_np, frame_np, mask=combined_mask)
+                filtered_frame = cv2.bitwise_and(frame_np, frame_np, mask=combined_mask)'''
                 
                 # YOLOv10で物体検出
-                results = model(filtered_frame)
+                results = model(frame_np) # frame_np, filtered_frame
                 # 検出結果を描画
                 result_img = results[0].plot()  # 検出結果を画像に描画
                 # 動画にフレームを追加
                 output.write(result_img)
                 n += 1
-                break
+                # break
             else:
                 break
     
     # 動画ファイルを閉じる
-    # output.release()
-    # cv2.destroyAllWindows()
+    output.release()
+    cv2.destroyAllWindows()
 
 def detect_fold(experiment: str, fold, gpu_id: int,
                 challenge: bool, use_saved_predictions: bool):
