@@ -3,7 +3,7 @@ from src.utils import get_lr
 
 
 image_size = (1280, 736)
-batch_size = 2
+batch_size = 1
 base_lr = 3e-4
 frame_stack_size = 15
 
@@ -51,7 +51,7 @@ config = dict(
         "optimizer": ("AdamW", {
             "lr": get_lr(base_lr, batch_size),
         }),
-        "device": ["cuda:0"],
+        "device": ["cuda:0"], 
         "image_size": image_size,
         "frame_stack_size": frame_stack_size,
         "frame_stack_step": 2,
@@ -62,7 +62,7 @@ config = dict(
             "pad_mode": "constant",
             "fill_value": 0,
         }),
-        "freeze_conv2d_encoder": False,
+        "freeze_conv2d_encoder": True,
     },
     frame_index_shaker={
         "shifts": [-1, 0, 1],
@@ -70,7 +70,7 @@ config = dict(
         "prob": 0.25,
     },
     pretrain_action_experiment="",
-    pretrain_ball_experiment="ball_tuning_001",
+    pretrain_ball_experiment="ball_tuning_002",
     torch_compile={
         "backend": "inductor",
         "mode": "default",

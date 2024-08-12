@@ -41,6 +41,8 @@ def get_raw_predictions(predictor: MultiDimStackerPredictor,
         while True:
             frame = frame_fetcher.fetch_frame()
             frame_index = frame_fetcher.current_index
+            # prediction で 12 クラスの値，predict_index でフレーム番号？が返ってくる
+            # ここで時間かかる
             prediction, predict_index = predictor.predict(frame, frame_index)
             if predict_index < min_frame_index:
                 continue
@@ -83,8 +85,54 @@ def predict_video(predictor: MultiDimStackerPredictor,
         )
         print("Raw predictions saved to", raw_predictions_path)
 
+    # 各クラスの開始時刻とその時の confidence を返す
     class2actions = raw_predictions_to_actions(frame_indexes, raw_predictions)
-    return class2actions
+    
+    # 前後の認識した結果に制約条件を加えたい
+    changed_class2actions = {}
+    for cls, cls_index in constants.class2target.items():
+        frames, confidences = class2actions[cls]
+        if cls in ['DRIVE']:
+            # 新しいフレーム番号とconfidenceを格納するためのリスト
+            new_frames = []
+            new_confidences = []
+
+            # フレーム番号の最初の値を保持
+            prev_frame = None
+
+            for i in range(len(frames)):
+                # フレーム番号の差を計算
+                if prev_frame is None or (frames[i] - prev_frame > 25):
+                    # 250以上の差がある場合、保持してリストに追加
+                    new_frames.append(frames[i])
+                    new_confidences.append(confidences[i])
+                    prev_frame = frames[i]  # 現在のフレーム番号を更新
+
+            # 更新したリストを新しい辞書に格納
+            changed_class2actions[cls] = (new_frames, new_confidences)
+        elif cls in ['OUT']:
+            # 新しいフレーム番号とconfidenceを格納するためのリスト
+            new_frames = []
+            new_confidences = []
+
+            # フレーム番号の最初の値を保持
+            prev_frame = None
+
+            for i in range(len(frames)):
+                # フレーム番号の差を計算
+                if prev_frame is None or (frames[i] - prev_frame > 250):
+                    # 250以上の差がある場合、保持してリストに追加
+                    new_frames.append(frames[i])
+                    new_confidences.append(confidences[i])
+                    prev_frame = frames[i]  # 現在のフレーム番号を更新
+
+            # 更新したリストを新しい辞書に格納
+            changed_class2actions[cls] = (new_frames, new_confidences)
+        else:
+            # 'DRIVE'や'OUT'以外のクラスはそのままコピー
+            changed_class2actions[cls] = (frames, confidences)
+    # print('changed_class2actions:', changed_class2actions)
+    return changed_class2actions
 
 
 def predict_game(predictor: MultiDimStackerPredictor,
@@ -98,11 +146,13 @@ def predict_game(predictor: MultiDimStackerPredictor,
 
     half2class_actions = dict()
     for half in constants.halves:
+        # 各クラスの開始時刻とその時の confidence を返す
         class_actions = predict_video(
             predictor, half, game_dir, game_prediction_dir, use_saved_predictions
         )
         half2class_actions[half] = class_actions
 
+    # json ファイルに変更し，出力
     prepare_game_spotting_results(half2class_actions, game, prediction_dir)
 
 

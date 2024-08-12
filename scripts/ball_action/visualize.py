@@ -31,7 +31,7 @@ def pad_to_length(lst, length):
     return lst
 
 
-def draw_graph(targets, predictions, pred_actions, length=96, height=33, upscale=4):
+def draw_graph(targets, predictions, pred_actions, length=96, height=20, upscale=3): # height=33
     targets = pad_to_length(targets, length)
     predictions = pad_to_length(predictions, length)
     pred_actions = pad_to_length(pred_actions, length)
@@ -61,10 +61,10 @@ def load_video_predictions(game_prediction_dir: Path, half: int):
     raw_predictions_npz = np.load(str(raw_predictions_path))
     frame_indexes = raw_predictions_npz["frame_indexes"]
     raw_predictions = raw_predictions_npz["raw_predictions"]
-    video_prediction = defaultdict(lambda: np.zeros(2, dtype=np.float32))
+    video_prediction = defaultdict(lambda: np.zeros(12, dtype=np.float32)) # 2
     for frame_index, prediction in zip(frame_indexes, raw_predictions):
         video_prediction[frame_index] = prediction
-    video_pred_actions = defaultdict(lambda: np.zeros(2, dtype=np.float32))
+    video_pred_actions = defaultdict(lambda: np.zeros(12, dtype=np.float32)) # 2
     for cls, cls_index in constants.class2target.items():
         action_frame_indexes, _ = post_processing(
             frame_indexes, raw_predictions[:, cls_index], **constants.postprocess_params
@@ -80,8 +80,8 @@ def visualize_video(half: int,
                     game_visualization_dir: Path,
                     game_video_data: dict,
                     gpu_id: int):
-    video_path = game_dir / f"{half}_{RESOLUTION}.mkv"
-    visualize_video_path = game_visualization_dir / f"{half}_{RESOLUTION}.avi"
+    video_path = game_dir / f"{RESOLUTION}.mp4" # {half}_{RESOLUTION}.mkv
+    visualize_video_path = game_visualization_dir / f"{RESOLUTION}.avi" # {half}_
     video_target = VideoTarget(game_video_data, constants.classes)
     video_prediction, video_pred_actions = load_video_predictions(game_prediction_dir, half)
 
@@ -110,13 +110,23 @@ def visualize_video(half: int,
             targets[cls].append(target[cls_index])
             pred_actions[cls].append(pred_action[cls_index])
 
-        x = 50
-        for cls, y in zip(constants.classes, (300, 500)):
+        x_left = 0
+        x_right = 900
+        y = [50, 160, 270, 380, 490, 600]
+        for i, cls in enumerate(constants.classes):
             pass_graph = draw_graph(targets[cls], predictions[cls], pred_actions[cls])
-            crop = frame[y: y + pass_graph.shape[0], x: x + pass_graph.shape[1]]
-            cv2.addWeighted(pass_graph, 1., crop, 1., 0.0, crop)
+            if i <= 5:
+                crop = frame[y[i]: y[i] + pass_graph.shape[0], x_left: x_left + pass_graph.shape[1]]
+                cv2.addWeighted(pass_graph, 1., crop, 1., 0.0, crop)
+                # add class name
+                cv2.putText(frame, cls, (x_left + 100, y[i] + 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
+            else:
+                crop = frame[y[i - 6]: y[i - 6] + pass_graph.shape[0], x_right: x_right + pass_graph.shape[1]]
+                cv2.addWeighted(pass_graph, 1., crop, 1., 0.0, crop)
+                # add class name
+                cv2.putText(frame, cls, (x_right + 25, y[i - 6] + 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
 
-        cv2.putText(frame, str(frame_index), (25, 50),
+        cv2.putText(frame, str(frame_index), (25, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255),
                     2, cv2.LINE_AA)
 

@@ -49,6 +49,7 @@ class MultiDimStackerPredictor:
 
     @torch.no_grad()
     def predict(self, frame: torch.Tensor, index: int) -> tuple[Optional[torch.Tensor], int]:
+        # frame.shape = (720, 1280)
         frame = frame.to(device=self.model.device)
         self._frame_index2frame[index] = self.frames_processor(frame[None, None, ...])[0, 0]
         predict_index = index - self._predict_offset
@@ -58,17 +59,23 @@ class MultiDimStackerPredictor:
             stacks_indexes = list(batched(predict_indexes, self.model_stack_size))
             for stack_indexes in stacks_indexes:
                 if stack_indexes not in self._stack_indexes2features:
+                    # frames.shape = (2, 3, 736, 1280])
                     frames = torch.stack([self._frame_index2frame[i] for i in stack_indexes], dim=0)
                     if self.tta:
                         frames = torch.stack([frames, hflip(frames)], dim=0)
                     else:
                         frames = frames.unsqueeze(0)
+                    # features.shape = (2, 1, 192, 23, 40)
                     features = self.model.nn_module.forward_2d(frames)
                     self._stack_indexes2features[stack_indexes] = features
             features = torch.cat([self._stack_indexes2features[s] for s in stacks_indexes], dim=1)
+            # features.shape = (2, 1280, 23, 40)
             features = self.model.nn_module.forward_3d(features)
+            # prediction.shape = (2, 12)
             prediction = self.model.nn_module.forward_head(features)
+            # prediction.shape = (2, 12)
             prediction = self.model.prediction_transform(prediction)
+            # prediction.shape = (12)
             prediction = torch.mean(prediction, dim=0)
             return prediction, predict_index
         else:

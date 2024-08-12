@@ -43,10 +43,26 @@ class2target: dict[str, int] = {cls: trg for trg, cls in enumerate(classes)}
 
 num_halves = 1
 halves = list(range(1, num_halves + 1))
+# ここで閾値を決定，ピークがheightを超えたときにその時刻を開始時刻？
+# クラスごとに変更する
 postprocess_params = {
     "gauss_sigma": 3.0,
     "height": 0.2,
     "distance": 15,
 }
+'''postprocess_params = [
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 40},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 250},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15},
+    {"gauss_sigma": 3.0, "height": 0.2, "distance": 15}
+]'''
 
 video_fps = 25.0

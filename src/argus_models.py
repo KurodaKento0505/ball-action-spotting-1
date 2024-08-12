@@ -39,6 +39,7 @@ class BallActionModel(argus.Model):
         self.mixup: Optional[TimmMixup] = None
 
     def train_step(self, batch, state: State) -> dict:
+        print('--start training--')
         self.train()
         self.optimizer.zero_grad()
 
@@ -74,6 +75,7 @@ class BallActionModel(argus.Model):
         }
 
     def val_step(self, batch, state: State) -> dict:
+        print('--start validation--')
         self.eval()
         with torch.no_grad():
             input, target = deep_to(batch, device=self.device, non_blocking=True)

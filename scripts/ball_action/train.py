@@ -6,8 +6,13 @@ from pathlib import Path
 from pprint import pprint
 from importlib.machinery import SourceFileLoader
 
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TORCH_USE_CUDA_DSA'] = '1'
+
 import torch
 import torch._dynamo
+torch.cuda.empty_cache()
 
 from argus import load_model
 from argus.callbacks import (
@@ -53,6 +58,7 @@ def train_ball_action(config: dict, save_dir: Path,
         pretrain_dir = action_experiments_dir / config["pretrain_action_experiment"]
     elif config["pretrain_ball_experiment"]:
         pretrain_dir = constants.experiments_dir / config["pretrain_ball_experiment"] / f"fold_{fold}"
+    print(pretrain_dir)
 
     if pretrain_dir:
         pretrain_model_path = get_best_model_path(pretrain_dir)
@@ -86,6 +92,7 @@ def train_ball_action(config: dict, save_dir: Path,
         model.nn_module = torch.compile(model.nn_module, **config["torch_compile"])
 
     device = torch.device(argus_params["device"][0])
+    print(f"Using device: {device}")
     train_data = get_videos_data(train_games)
     videos_sampling_weights = get_videos_sampling_weights(
         train_data, **config["train_sampling_weights"],
