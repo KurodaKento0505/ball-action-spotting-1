@@ -73,8 +73,9 @@ def get_videos_data(games: list[str],
 def raw_predictions_to_actions(frame_indexes: list[int], raw_predictions: np.ndarray):
     class2actions = dict()
     for cls, cls_index in constants.class2target.items():
+        # ピークフレーム番号と，ピークにおける confidence を返す
         class2actions[cls] = post_processing(
-            frame_indexes, raw_predictions[:, cls_index], **constants.postprocess_params
+            frame_indexes, raw_predictions[:, cls_index], **constants.postprocess_params # [cls_index]
         )
         print(f"Predicted {len(class2actions[cls][0])} {cls} actions")
     return class2actions
