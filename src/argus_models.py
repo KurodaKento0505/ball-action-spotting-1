@@ -39,7 +39,6 @@ class BallActionModel(argus.Model):
         self.mixup: Optional[TimmMixup] = None
 
     def train_step(self, batch, state: State) -> dict:
-        print('--start training--')
         self.train()
         self.optimizer.zero_grad()
 

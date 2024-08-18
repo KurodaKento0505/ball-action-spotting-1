@@ -5,6 +5,7 @@ from tqdm import tqdm
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from ultralytics import YOLO
 
 import time
 import json
@@ -87,12 +88,12 @@ def binary_kmeans(frame):
     edges = cv2.Canny(binary_img, 50, 150)
 
 
-def Wide_Angle_Shot(frame, hsv_frame):
+def Wide_Angle_Shot_with_Green(frame, hsv_frame):
     # フレームの50%以上が緑色なら広角と判断
-    green_threshold = 0.5 
+    green_threshold = 0.4
     # 緑色の範囲を定義 (この範囲は調整が必要です)
-    lower_green = np.array([35, 40, 40])
-    upper_green = np.array([40, 255, 255])
+    lower_green = np.array([30, 40, 40])
+    upper_green = np.array([50, 255, 255])
     # 緑色のマスクを作成
     gr_mask = cv2.inRange(hsv_frame, lower_green, upper_green)
     # 緑色の割合を計算
@@ -100,8 +101,32 @@ def Wide_Angle_Shot(frame, hsv_frame):
     # 緑色の割合 (と特徴点数) が閾値を超える場合、広角ショットと判断
     wide_angle_shot = False
     if green_ratio > green_threshold: # and p0 is not Noneand len(p0) > matching_threshold:
-        cv2.putText(frame, "Wide Angle Shot", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
         wide_angle_shot = True
+    return wide_angle_shot
+
+
+def Wide_Angle_Shot_with_Player_Bbox(frame):
+    # YOLOv10
+    model = YOLO("trained_model/yolov10n.pt")
+    results = model(frame)
+    boxes = results[0].boxes  # 検出結果を取得
+    # 閾値（ピクセル面積の閾値）を設定
+    bbox_threshold = 20000  # 適切な値に調整
+    # 検出された人の中で最もコンフィデンスが高い物体を取得
+    if len(boxes) > 0:
+        # コンフィデンスが最も高いボックスを選択
+        max_confidence_box = max(boxes, key=lambda box: box.conf)
+        # バウンディングボックスの座標を取得
+        x1, y1, x2, y2 = max_confidence_box.xyxy[0]
+        # バウンディングボックスの面積を計算
+        max_area = (x2 - x1) * (y2 - y1)
+        # 最大のバウンディングボックスの面積が閾値以下の場合、広角ショットと判断
+        wide_angle_shot = max_area < bbox_threshold
+    else:
+        # 検出された人がいない場合、広角ショットではないと判断
+        wide_angle_shot = True
+        max_area = 0
+    print(max_area)
     return wide_angle_shot
 
 
@@ -159,18 +184,6 @@ def estimate_camera_movement(game: str, prediction_dir: Path):
     ret, prev_frame = cap.read()
     prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
 
-    # オプティカルフローのパラメータ設定
-    lk_params = dict(winSize=(15, 15), maxLevel=2, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
-    
-    # goodFeaturesToTrackのパラメータ設定
-    feature_params = dict(maxCorners=100,     # 検出する特徴点の最大数
-                          qualityLevel=0.3,   # 特徴点の品質の最低基準
-                          minDistance=7,      # 特徴点間の最小距離
-                          blockSize=7)        # ブロックサイズ
-    
-    # 閾値設定（特徴点が少ない場合に画角変更とみなす）
-    matching_threshold = 10
-
     n = 0
     with tqdm(total = 2000) as t:
         while n < 2000:
@@ -191,7 +204,7 @@ def estimate_camera_movement(game: str, prediction_dir: Path):
             output.write(edges)'''
 
             ########################## 緑の量から wide angle shot を推定 ##########################
-            wide_angle_shot = Wide_Angle_Shot(frame, hsv_frame)
+            wide_angle_shot = Wide_Angle_Shot_with_Green(frame, hsv_frame)
 
             ########################## 線検出 ##########################
             '''detect_line(frame, hsv_frame)'''

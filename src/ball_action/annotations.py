@@ -11,7 +11,7 @@ from src.ball_action import constants
 def get_game_videos_data(game: str,
                          resolution="720p",
                          add_empty_actions: bool = False) -> list[dict]:
-    assert resolution in {"224p", "720p"}
+    assert resolution in {"224p", "720p", "masked_video"}
 
     game_dir = constants.soccernet_dir / game
     labels_json_path = game_dir / constants.labels_filename #"labels_challange_2024.json"

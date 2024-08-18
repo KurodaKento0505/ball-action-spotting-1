@@ -93,7 +93,7 @@ def train_ball_action(config: dict, save_dir: Path,
 
     device = torch.device(argus_params["device"][0])
     print(f"Using device: {device}")
-    train_data = get_videos_data(train_games)
+    train_data = get_videos_data(train_games, resolution="masked_video")
     videos_sampling_weights = get_videos_sampling_weights(
         train_data, **config["train_sampling_weights"],
     )
