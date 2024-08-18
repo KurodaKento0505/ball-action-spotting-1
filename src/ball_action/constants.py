@@ -14,9 +14,10 @@ fold_games = [
     "england_efl/2019-2020/2019-10-01 - Brentford - Bristol City",
     "england_efl/2019-2020/2019-10-01 - Blackburn Rovers - Nottingham Forest",
     "england_efl/2019-2020/2019-10-01 - Middlesbrough - Preston North End",
-    "england_efl/2019-2020/2019-10-01 - Stoke City - Huddersfield Town",
-    "england_efl/2019-2020/2019-10-01 - Reading - Fulham",
 ]
+# "england_efl/2019-2020/2019-10-01 - Stoke City - Huddersfield Town",
+# "england_efl/2019-2020/2019-10-01 - Reading - Fulham",
+
 fold2games = {fold: [game] for fold, game in enumerate(fold_games)}
 game2fold = {game: fold for fold, games in fold2games.items() for game in games}
 folds = sorted(fold2games.keys())

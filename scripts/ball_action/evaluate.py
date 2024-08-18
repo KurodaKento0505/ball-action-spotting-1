@@ -36,6 +36,9 @@ def evaluate_predictions(experiment: str, fold: int, challenge: bool):
     # games = constants.fold2games[fold]
     print("Evaluate games", games)
 
+    ############################## 認識結果に制約条件与える #########################
+    
+
     results = evaluate(
         SoccerNet_path=constants.soccernet_dir,
         Predictions_path=str(predictions_path),
