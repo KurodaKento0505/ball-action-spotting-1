@@ -72,7 +72,7 @@ def binary_kmeans(frame):
     # 画像を2次元配列に変換 (k-meansの入力に使用)
     image_reshaped = frame.reshape(-1, 3)
     # k-meansで5つのクラスタに分割
-    kmeans = KMeans(n_clusters=5, random_state=0).fit(image_reshaped)
+    kmeans = KMeans(n_clusters=5, random_state=0, n_init=10).fit(image_reshaped)
     labels = kmeans.labels_
     # 5つのクラスタをGチャンネルのみで表現
     clustered_img = np.zeros((h, w), dtype=np.uint8)
@@ -85,7 +85,25 @@ def binary_kmeans(frame):
     binary_img = np.zeros((h, w), dtype=np.uint8)
     binary_img[clustered_img > white_threshold] = 255
     # エッジ検出 (Canny)
-    edges = cv2.Canny(binary_img, 50, 150)
+    # edges = cv2.Canny(binary_img, 50, 150)
+    return binary_img
+
+
+# Optical Flowを可視化する関数
+def draw_optical_flow(frame, flow, step=16):
+    h, w = frame.shape[:2]
+    y, x = np.mgrid[step//2:h:step, step//2:w:step].reshape(2, -1)
+    fx, fy = flow[y, x].T
+    # 元のフレームをカラー画像に変換
+    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    # ベクトルの終点を計算
+    lines = np.vstack([x, y, x+fx, y+fy]).T.reshape(-1, 2, 2)
+    lines = np.int32(lines + 0.5)
+    # ベクトルを描画
+    for (x1, y1), (x2, y2) in lines:
+        cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)  # 緑の線を描画
+        cv2.circle(frame, (x1, y1), 1, (0, 255, 0), -1)  # 緑の点を描画
+    return frame
 
 
 def Wide_Angle_Shot_with_Green(frame, hsv_frame):
@@ -183,10 +201,12 @@ def estimate_camera_movement(game: str, prediction_dir: Path):
     # 最初のフレームを取得してグレースケールに変換
     ret, prev_frame = cap.read()
     prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+    prev_binary_frame = None
+    prev_wide_angle_shot = False
 
     n = 0
-    with tqdm(total = 2000) as t:
-        while n < 2000:
+    with tqdm(total = 50) as t:
+        while n < 50:
             t.update()
             ret, frame = cap.read()
             if not ret:
@@ -194,26 +214,52 @@ def estimate_camera_movement(game: str, prediction_dir: Path):
 
             ########################## 画像変換 ##########################
             # 現在のフレームをグレースケールに変換
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             # hsv変換
-            hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            # hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-            ########################## k-meansで5つのクラスタから二値化してエッジ検出 ##########################
-            '''edges = binary_kmeans(frame)
-            # 結果を動画として保存
-            output.write(edges)'''
+            ################ 広角か否かの判断 ################
+            # wide_angle_shot = Wide_Angle_Shot_with_Green(frame, hsv_frame)
+            if n % 15 == 0:
+                wide_angle_shot = Wide_Angle_Shot_with_Player_Bbox(frame)
+                prev_wide_angle_shot = wide_angle_shot
+            else:
+                wide_angle_shot = prev_wide_angle_shot
 
-            ########################## 緑の量から wide angle shot を推定 ##########################
-            wide_angle_shot = Wide_Angle_Shot_with_Green(frame, hsv_frame)
+            ################ 広角 ################
+            if wide_angle_shot:
+
+                ########################## k-meansで5つのクラスタから二値化してエッジ検出 ##########################
+                binary_frame = binary_kmeans(frame)
+
+                ########################## 二値化された画像からオプティカルフローでカメラの動きを検出 ##########################
+                if prev_binary_frame is not None:
+                    flow = cv2.calcOpticalFlowFarneback(prev_binary_frame, binary_frame, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+                    prev_binary_frame = binary_frame
+                    # オプティカルフローを可視化
+                    binary_frame = draw_optical_flow(prev_binary_frame, flow)
+                    '''# オプティカルフローの結果からカメラの動きを計算（例：水平方向と垂直方向の移動量を計算）
+                    flow_mean = np.mean(flow, axis=(0, 1))
+                    camera_shift_x = flow_mean[0]
+                    camera_shift_y = flow_mean[1]
+                    # 結果を表示（または、他の方法でカメラの動きを利用）
+                    print(f"Frame {n}: Camera shift (x, y) = ({camera_shift_x:.2f}, {camera_shift_y:.2f})")'''
+                else:
+                    prev_binary_frame = binary_frame
+
+                # 結果を動画として保存
+                output.write(binary_frame)
+            
+            ################ 広角じゃない ################
+            else:
+                output.write(frame)
+                prev_binary_frame = None
 
             ########################## 線検出 ##########################
             '''detect_line(frame, hsv_frame)'''
 
             ########################## 特徴点検出 ##########################
             # p0 = cv2.goodFeaturesToTrack(gray, mask=None, **feature_params)
-
-            # 結果を動画として保存
-            output.write(frame)
 
             # 次のフレームのために現在のフレームを保存
             # prev_gray = gray.copy()

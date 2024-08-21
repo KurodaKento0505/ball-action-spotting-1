@@ -6,6 +6,9 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from ultralytics import YOLO
+# from sahi import AutoDetectionModel
+# from sahi.predict import get_sliced_prediction
+from collections import deque
 
 import time
 import json
@@ -142,34 +145,9 @@ def tracking(frame, results):
 
 
 # フレームを切り取る
-def cut_frame(frame):
-    # フレームのサイズ取得
-    h, w, _ = frame.shape
-    # フレームの中央部分を切り取る（幅、高さを半分に）
-    cut_frame = frame[h//4:3*h//4, w//4:3*w//4]
-    return cut_frame
-
-
-def draw_bbox(frame, results):
-    boxes = results[0].boxes  # 検出結果を取得
-    # confidenceが最も高いボールを選択
-    if boxes:
-        best_box = max(boxes, key=lambda x: x.conf)
-        x_min, y_min, x_max, y_max = best_box.xyxy[0].tolist()  # 座標を取得
-        x_min, y_min, x_max, y_max = int(x_min), int(y_min), int(x_max), int(y_max)
-        # yoloの結果を描画
-        confidence = best_box.conf.item()  # 信頼度を取得
-        # バウンディングボックスを描画
-        cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
-        # ラベルと信頼度を描画
-        cv2.putText(frame, f"ball {confidence:.2f}", (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-
-
-# ボール周辺以外にマスクをかける
-def mask(frame, results, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2):
+def cut_frame(frame, results, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2):
     boxes = results[0].boxes  # 検出結果を取得
     # フレームを黒くする
-    masked_frame = np.zeros_like(frame)
     # confidenceが最も高いボールを選択
     if boxes:
         best_box = max(boxes, key=lambda x: x.conf)
@@ -184,7 +162,7 @@ def mask(frame, results, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_ma
             y1 = int(max(0, y_center - 180))
             x2 = int(min(frame.shape[1], x_center + 320))
             y2 = int(min(frame.shape[0], y_center + 180))
-            masked_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+            cut_frame = frame[y1:y2, x1:x2]
             prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = x1, y1, x2, y2
         # confidence >= 0.7
         elif confidence >= 0.6:
@@ -207,15 +185,15 @@ def mask(frame, results, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_ma
                 overlap_ratio = intersection_area / prev_mask_area
                 # 前のフレームとの重なりが50％以上，現在の認識結果の使用
                 if overlap_ratio >= 0.3:
-                    masked_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+                    cut_frame = frame[y1:y2, x1:x2]
                     prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = x1, y1, x2, y2
                 # 前のフレームとの重なりが50％未満，前のフレームのまま
                 else:
-                    masked_frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2] = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
+                    cut_frame = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
 
             # 前のフレームのマスク情報なし
             else:
-                masked_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+                cut_frame = frame[y1:y2, x1:x2]
                 prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = x1, y1, x2, y2
         
         # confidence >= 0.7
@@ -239,33 +217,156 @@ def mask(frame, results, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_ma
                 overlap_ratio = intersection_area / prev_mask_area
                 # 前のフレームとの重なりが50％以上，現在の認識結果の使用
                 if overlap_ratio >= 0.5:
-                    masked_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+                    cut_frame = frame[y1:y2, x1:x2]
                     prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = x1, y1, x2, y2
                 # 前のフレームとの重なりが50％未満，前のフレームのまま
                 else:
-                    masked_frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2] = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
+                    cut_frame = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
 
             # 前のフレームのマスク情報なし
             else:
-                masked_frame = frame
+                cut_frame = frame
                 # prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = x1, y1, x2, y2
 
         # confidence < 0.7，前のフレームのまま
         else:
             # 前のフレームのマスク情報あり
             if prev_masked_x1 != -1:
-                masked_frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2] = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
+                cut_frame = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
             # 前のフレームのマスク情報なし
             else:
-                masked_frame = frame
+                cut_frame = frame
     # 認識できなかった
     else:
         # 前のフレームのマスク情報あり
         if prev_masked_x1 != -1:
+            cut_frame = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
+        # 前のフレームのマスク情報なし
+        else:
+            cut_frame = frame
+    return cut_frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2
+
+
+def draw_bbox(frame, results, cls_name = None, Track = False):
+    if Track:
+        # トラッキング結果を描画
+        for track in results:
+            if not track.is_confirmed():
+                continue
+            track_id = track.track_id
+            ltrb = track.to_ltrb()
+            x_min, y_min, x_max, y_max = map(int, ltrb)
+            # バウンディングボックスを描画
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
+            # ラベルとIDを描画
+            label = f"ID: {track_id}"
+            cv2.putText(frame, label, (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    else:
+        boxes = results[0].boxes  # 検出結果を取得
+        if boxes:
+            # confidenceが最も高いボールを選択
+            best_box = max(boxes, key=lambda x: x.conf)
+            x_min, y_min, x_max, y_max = best_box.xyxy[0].tolist()  # 座標を取得
+            x_min, y_min, x_max, y_max = int(x_min), int(y_min), int(x_max), int(y_max)
+            # yoloの結果を描画
+            confidence = best_box.conf.item()  # 信頼度を取得
+            # バウンディングボックスを描画
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
+            # ラベルと信頼度を描画
+            label = f"{cls_name} {confidence:.2f}" if cls_name else f"Conf: {confidence:.2f}"
+            cv2.putText(frame, label, (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
+
+def draw_bbox_SAHI(frame, results_ball):
+    for object_prediction in results_ball.object_prediction_list:
+        x_min, y_min, x_max, y_max = map(int, object_prediction.bbox.to_voc_bbox())
+        confidence = object_prediction.score.value
+        label = f"ball {confidence:.2f}"
+        cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
+        cv2.putText(frame, label, (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
+
+def results_to_json(results_ball, n, ball_detections):
+    boxes = results_ball[0].boxes  # 検出結果を取得
+    if boxes:
+        # confidenceが最も高いボールを選択
+        best_box = max(boxes, key=lambda x: x.conf)
+        confidence = best_box.conf.item()
+        # コンフィデンスが0.8以上のボールのバウンディングボックスを記録
+        if confidence >= 0.8:
+            x_min, y_min, x_max, y_max = best_box.xyxy[0].tolist()  # 座標を取得
+            x_min, y_min, x_max, y_max = int(x_min), int(y_min), int(x_max), int(y_max)
+            ball_detections.append({
+                    'frame_number': n,
+                    'x_min': x_min,
+                    'y_min': y_min,
+                    'x_max': x_max,
+                    'y_max': y_max,
+                    'confidence': confidence
+                })
+
+
+# ボール周辺以外にマスクをかける
+def mask_frame(frame, results, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2):
+    boxes = results[0].boxes  # 検出結果を取得
+    # フレームを黒くする
+    masked_frame = np.zeros_like(frame)
+    # confidenceが最も高いボールを選択
+    if boxes:
+        best_box = max(boxes, key=lambda x: x.conf)
+        x_min, y_min, x_max, y_max = best_box.xyxy[0].tolist()  # 座標を取得
+        x_min, y_min, x_max, y_max = int(x_min), int(y_min), int(x_max), int(y_max)
+        confidence = best_box.conf.item()
+        # ボールを検出して誤検出を省く
+        # confidence < 0.4 は信用しない
+        if confidence >= 0.8:
+            x_center = int((x_min + x_max) / 2)
+            y_center = int((y_min + y_max) / 2)
+            x1 = int(max(0, x_center - 360))
+            y1 = int(max(0, y_center - 180))
+            x2 = int(min(frame.shape[1], x_center + 360))
+            y2 = int(min(frame.shape[0], y_center + 180))
+            masked_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+            prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = x1, y1, x2, y2
+            # ボールとプレーヤーの検出結果を描画
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)  # ボールのバウンディングボックスを緑で描画
+            cv2.putText(frame, f'Ball: {confidence:.2f}', (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        # confidence >= 0.4
+        else:
+            '''# 前のフレームのマスク情報あり
+            if prev_masked_x1 != -1:
+                # 重なり領域を計算
+                intersection_x1 = max(prev_masked_x1, x1)
+                intersection_y1 = max(prev_masked_y1, y1)
+                intersection_x2 = min(prev_masked_x2, x2)
+                intersection_y2 = min(prev_masked_y2, y2)
+                intersection_area = max(0, intersection_x2 - intersection_x1) * max(0, intersection_y2 - intersection_y1)
+                
+                prev_mask_area = (prev_masked_x2 - prev_masked_x1) * (prev_masked_y2 - prev_masked_y1)
+                overlap_ratio = intersection_area / prev_mask_area
+                # 前のフレームとの重なりが50％以上，現在の認識結果の使用
+                if overlap_ratio >= 0.3:
+                    masked_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+                    prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = x1, y1, x2, y2
+                # 前のフレームとの重なりが50％未満，前のフレームのまま
+                else:
+                    masked_frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2] = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
+            # 前のフレームのマスク情報なし
+            else:
+                masked_frame = frame
+                # masked_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+                # prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = x1, y1, x2, y2'''
+            masked_frame = frame
+
+    # 認識できなかった
+    else:
+        '''# 前のフレームのマスク情報あり
+        if prev_masked_x1 != -1:
             masked_frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2] = frame[prev_masked_y1:prev_masked_y2, prev_masked_x1:prev_masked_x2]
         # 前のフレームのマスク情報なし
         else:
-            masked_frame = frame
+            masked_frame = frame'''
+        masked_frame = frame
     return masked_frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2
 
 
@@ -283,68 +384,122 @@ def detect_game(game: str,
     if not cap.isOpened():
         return
     
-    n = 0
+    n = 1
 
     # YOLOv10モデルの読み込み
-    model = YOLO("trained_model/yolov10_816.pt")
+    model_ball = YOLO("trained_model/yolov10_816.pt")
+    model_person = YOLO('trained_model/yolov8n.pt')
+    '''detection_model = AutoDetectionModel.from_pretrained(
+        model_type="yolov8",
+        model_path="trained_model/yolov10_816.pt",
+        confidence_threshold=0.3,
+        device="cuda:0",
+    )'''
+
     # 動画ライターの設定
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # コーデックの設定
-    output_path = game_dir / f"masked_video.{constants.videos_extension}"
+    # output_path = game_dir / f"masked_video.{constants.videos_extension}"
+    output_path = "data/tutorial/detections/output_video.mp4"
     output = cv2.VideoWriter(str(output_path), fourcc, int(25), (int(1280), int(720)))  # 出力ファイル、フレームレート、フレームサイズを設定
     
     # 前のフレームのボール位置を初期化
     prev_frame = None
     prev_wide_angle_shot = False
     prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = -1, -1, -1, -1
-    
-    with tqdm(total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))) as t:
-        while True: # True:
+    # 結果を保存するリスト
+    # ball_detections = []
+    wide_angle_changes = []
+
+    # 物体検出した結果
+
+
+    with tqdm(total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))) as t: # total=1000
+        while True: # n < 1000:
             t.update()
             ret, frame = cap.read()
             if ret:
                 ################ 画像変換 ###################
                 # グレースケール変換
-                gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                # gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 # hsv変換
-                hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-                ################ 画像を切り取る ###################
-                # cut_frame(frame)
-                
-                ################ 物体検出 ################
-                # YOLOv10で物体検出
-                results = model(frame) # frame, center_frame, filtered_frame
-                # 認識結果の描画
-                # draw_bbox(frame, results)
+                # hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
                 ################ 広角か否かの判断 ################
                 # wide_angle_shot = Wide_Angle_Shot_with_Green(frame, hsv_frame)
                 if n % 15 == 0:
                     wide_angle_shot = Wide_Angle_Shot_with_Player_Bbox(frame)
-                    prev_wide_angle_shot = wide_angle_shot
+                    # prev_wide_angle_shot = wide_angle_shot
                 else:
                     wide_angle_shot = prev_wide_angle_shot
+                
+                # 広角ショットの切り替えを記録
+                if wide_angle_shot != prev_wide_angle_shot:
+                    if wide_angle_shot:
+                        binary_wide_angle_shot = 0
+                    else:
+                        binary_wide_angle_shot = 1
+                    wide_angle_changes.append({
+                        "frame_number": n,
+                        "wide_angle": binary_wide_angle_shot
+                    })
+                prev_wide_angle_shot = wide_angle_shot
 
-                ################ マスクかける ################
+                ################ 広角 ################
                 if wide_angle_shot:
-                    frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = mask(frame, results, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2)
+
+                    ############### 画像を切り取る ###################
+                    # cut_frame(frame)
+
+                    ################ 物体検出 ################
+                    # YOLOv10で物体検出
+                    # results_ball = model_ball(frame) # frame, center_frame, filtered_frame
+                    # draw_bbox(frame, results_ball)
+                    # SAHI
+                    '''results_ball = get_sliced_prediction(
+                        frame,
+                        detection_model,
+                        slice_height=200,
+                        slice_width=200,
+                        overlap_height_ratio=0.2,
+                        overlap_width_ratio=0.2,
+                    )
+                    draw_bbox_SAHI(frame, results_ball)'''
+                    # 検出結果をjsonで保存
+                    # results_to_json(results_ball, n, ball_detections)
+                    # jsonから読み取る
+
+                    ################ マスクかける ################
+                    # frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = mask_frame(frame, results_ball, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2)
+                    # cut
+                    # frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = cut_frame(frame, results_ball, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2)
+                    # results_ball = model_ball(frame)
+                    # results_person = model_person.track(frame)
+                    # draw_bbox(frame, results_ball, 'ball')
+                    # draw_bbox(frame, results_person, Track=True)
                     # cv2.putText(frame, "Wide Angle Shot", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
-                # 画角が切り替わったら前のフレームのマスク情報を一回なくす
+                
+                ################ 広角じゃない ################
                 else:
                     prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = -1, -1, -1, -1
+                
+                # draw_bbox(frame, results_ball)
                 ################ 物体追跡 ################
                 # tracking(frame, results)
 
                 # 動画にフレームを追加
-                output.write(frame)
+                # output.write(frame)
                 n += 1
                 # break
             else:
                 break
     
+    with open(game_dir / f"wide_angle_changes.json", 'w') as f:
+        json.dump(wide_angle_changes, f, indent=4)
+
     # 動画ファイルを閉じる
-    output.release()
-    cv2.destroyAllWindows()
+    cap.release()
+    # output.release()
+    # cv2.destroyAllWindows()
 
 
 def detect_fold(experiment: str, fold):
