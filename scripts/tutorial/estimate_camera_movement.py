@@ -5,6 +5,7 @@ from tqdm import tqdm
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from PIL import Image
 from ultralytics import YOLO
 
 import time
@@ -15,6 +16,7 @@ from pathlib import Path
 from pprint import pprint
 from importlib.machinery import SourceFileLoader
 from sklearn.cluster import KMeans
+import subprocess
 
 import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
@@ -72,7 +74,7 @@ def binary_kmeans(frame):
     # 画像を2次元配列に変換 (k-meansの入力に使用)
     image_reshaped = frame.reshape(-1, 3)
     # k-meansで5つのクラスタに分割
-    kmeans = KMeans(n_clusters=5, random_state=0).fit(image_reshaped)
+    kmeans = KMeans(n_clusters=5, random_state=0, n_init=10).fit(image_reshaped)
     labels = kmeans.labels_
     # 5つのクラスタをGチャンネルのみで表現
     clustered_img = np.zeros((h, w), dtype=np.uint8)
@@ -85,7 +87,25 @@ def binary_kmeans(frame):
     binary_img = np.zeros((h, w), dtype=np.uint8)
     binary_img[clustered_img > white_threshold] = 255
     # エッジ検出 (Canny)
-    edges = cv2.Canny(binary_img, 50, 150)
+    # edges = cv2.Canny(binary_img, 50, 150)
+    return binary_img
+
+
+# Optical Flowを可視化する関数
+def draw_optical_flow(frame, flow, step=16):
+    h, w = frame.shape[:2]
+    y, x = np.mgrid[step//2:h:step, step//2:w:step].reshape(2, -1)
+    fx, fy = flow[y, x].T
+    # 元のフレームをカラー画像に変換
+    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    # ベクトルの終点を計算
+    lines = np.vstack([x, y, x+fx, y+fy]).T.reshape(-1, 2, 2)
+    lines = np.int32(lines + 0.5)
+    # ベクトルを描画
+    for (x1, y1), (x2, y2) in lines:
+        cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)  # 緑の線を描画
+        cv2.circle(frame, (x1, y1), 1, (0, 255, 0), -1)  # 緑の点を描画
+    return frame
 
 
 def Wide_Angle_Shot_with_Green(frame, hsv_frame):
@@ -130,34 +150,108 @@ def Wide_Angle_Shot_with_Player_Bbox(frame):
     return wide_angle_shot
 
 
-def detect_line(frame, hsv_frame):
-    # 緑色の範囲を定義 (この範囲は調整が必要です)
-    lower_green = np.array([35, 40, 40])
-    upper_green = np.array([40, 255, 255])
-    # 緑色のマスクを作成
-    gr_mask = cv2.inRange(hsv_frame, lower_green, upper_green)
-    gr_mask = cv2.bitwise_not(gr_mask)
-    masked_frame = cv2.bitwise_and(frame, frame, mask=gr_mask)
+def stretch_to_square(frame):
+    # フレームの高さと幅を取得
+    h, w = frame.shape[:2]
+    if h >= w:
+        print("The frame is already square or taller than wide.")
+        return frame
+    # 上半分の領域を取得
+    top_half = frame[:h//2, :]
+    bottom_half = frame[h//2:, :]
+    # 上半分を引き伸ばして正方形を作成
+    stretched_top_half = cv2.resize(top_half, (w, h//2), interpolation=cv2.INTER_LINEAR)
+    # 引き伸ばした領域を新しい正方形フレームにコピー
+    square_frame = np.vstack([stretched_top_half, bottom_half])
+    # フレームが1280x1280になるように調整
+    square_frame = cv2.resize(square_frame, (w, w))
+    return square_frame
 
-    masked_gray = cv2.cvtColor(masked_frame, cv2.COLOR_BGR2GRAY)
-    # 横方向フィルタ
-    dx = cv2.Sobel(masked_gray, cv2.CV_64F, 1, 0, ksize=3)
-    # Laplacianフィルターを適用
-    laplacian = cv2.Laplacian(masked_frame, cv2.CV_64F)
-    # エッジを絶対値に変換して明るく
-    abs = cv2.convertScaleAbs(laplacian)
-    # エッジを太く強調
-    kernel = np.ones((5, 5), np.uint8)  # 太さを決定するカーネルサイズ
-    dilated_edges = cv2.dilate(abs, kernel, iterations=1)
-    # 明るさを調整してエッジをさらに強調
-    enhanced_edges = cv2.convertScaleAbs(dilated_edges, alpha=2, beta=50)  # alphaとbetaは明るさとコントラストの調整
-    # im_edges = cv2.Canny(masked_frame, 100, 200, L2gradient=True)
-    cv2.imwrite('data/tutorial/estimate_camera_movement/edge.png', enhanced_edges)
-    im_lines = cv2.HoughLines(enhanced_edges, rho=1, theta=np.pi/180, threshold=20)
-    for line in im_lines:
-        rho, theta = line[0]
-        result = draw_line(frame, theta, rho)
-    cv2.imwrite('data/tutorial/estimate_camera_movement/red_line.png', result)
+
+def stretch_frame(frame):
+    # フレームのサイズを取得
+    height, width = frame.shape[:2]
+    
+    # 引き伸ばし対象の560行とそのままの160行を設定
+    stretch_height = height - 160  # 560行
+    keep_height = 160  # 一番下の160行
+    
+    # PILのImageに変換
+    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    
+    # セクションの高さを計算
+    quarter_height = stretch_height // 4
+    
+    # 新しい画像のターゲット高さ（1280ピクセル）
+    target_height = 1280
+    
+    # 新しい画像を作成
+    new_image = Image.new("RGB", (width, target_height))
+    previous_new_y = 0  # 最後に貼り付けた位置を保持
+    
+    # 一番上の1/4を5/2倍に引き伸ばす
+    top_section = image.crop((0, 0, width, quarter_height))
+    top_stretched = top_section.resize((width, quarter_height * 5 // 2))
+    new_image.paste(top_stretched, (0, previous_new_y))
+    previous_new_y += quarter_height * 5 // 2
+    
+    # 上から二番目の1/4を9/4倍に引き伸ばす
+    upper_middle_section = image.crop((0, quarter_height, width, 2 * quarter_height))
+    upper_middle_stretched = upper_middle_section.resize((width, quarter_height * 9 // 4))
+    new_image.paste(upper_middle_stretched, (0, previous_new_y))
+    previous_new_y += quarter_height * 9 // 4
+    
+    # 下から二番目の1/4を7/4倍に引き伸ばす
+    lower_middle_section = image.crop((0, 2 * quarter_height, width, 3 * quarter_height))
+    lower_middle_stretched = lower_middle_section.resize((width, quarter_height * 7 // 4))
+    new_image.paste(lower_middle_stretched, (0, previous_new_y))
+    previous_new_y += quarter_height * 7 // 4
+    
+    # 一番下の1/4を3/2倍に引き伸ばす
+    bottom_section = image.crop((0, 3 * quarter_height, width, 4 * quarter_height))
+    bottom_stretched = bottom_section.resize((width, quarter_height * 3 // 2))
+    new_image.paste(bottom_stretched, (0, previous_new_y))
+    previous_new_y += quarter_height * 3 // 2
+    
+    # 一番下の160行はそのまま等倍で配置
+    final_section = image.crop((0, stretch_height, width, height))
+    new_image.paste(final_section, (0, previous_new_y))
+    
+    # OpenCV形式に戻して返す
+    return cv2.cvtColor(np.array(new_image), cv2.COLOR_RGB2BGR)
+
+
+def add_black_to_square(frame):
+    # フレームの高さと幅を取得
+    h, w = frame.shape[:2]
+    if h >= w:
+        print("The frame is already square or taller than wide.")
+        return frame
+    # 正方形の高さを計算
+    square_size = w
+    # 上部を黒で塗りつぶす
+    black_top = np.zeros((square_size - h, w, 3), dtype=np.uint8)
+    # 黒い領域を上に追加して正方形を作成
+    square_frame = np.vstack([black_top, frame])
+    # フレームが1280x1280になるように調整
+    square_frame = cv2.resize(square_frame, (w, w))
+    return square_frame
+
+
+def convert_to_h264(input_file, output_file):
+    # ffmpegコマンドを使用して、mpeg4コーデックをh264に変換
+    cmd = [
+        "ffmpeg", "-i", str(input_file), "-c:v", "libx264", "-c:a", "aac", "-strict", "experimental", str(output_file)
+    ]
+
+    # コマンドを実行
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    # 結果を確認
+    if result.returncode == 0:
+        print(f"Successfully converted {input_file} to {output_file} with h264 codec.")
+    else:
+        print(f"Failed to convert {input_file}. Error: {result.stderr}")
 
 
 def estimate_camera_movement(game: str, prediction_dir: Path):
@@ -174,8 +268,14 @@ def estimate_camera_movement(game: str, prediction_dir: Path):
     cap = cv2.VideoCapture(str(video_path))
 
     # 動画の書き出し設定
+    output_path = game_dir / f"square_video.{constants.videos_extension}"
+    print("output_path:", output_path)
+    # output_path = 'data/tutorial/estimate_camera_movement/output_video.mp4'
+    # 一時的な動画ファイルパス
+    temp_output_path = game_dir / f"square_video_temp.mp4"
+    # temp_output_path = 'data/tutorial/estimate_camera_movement/output_video.mp4'
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    output = cv2.VideoWriter('data/tutorial/estimate_camera_movement/output_video.mp4', fourcc, 25.0, (1280, 720))
+    output = cv2.VideoWriter(str(temp_output_path), fourcc, 25.0, (1280, 1280))
 
     # 背景差分用のオブジェクトを作成
     backSub = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=False)
@@ -183,10 +283,14 @@ def estimate_camera_movement(game: str, prediction_dir: Path):
     # 最初のフレームを取得してグレースケールに変換
     ret, prev_frame = cap.read()
     prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+    prev_binary_frame = None
+    prev_wide_angle_shot = False
+    movement_threshold = 10
+    stretched_height = 1280  # 引き延ばしたいサイズを指定
 
     n = 0
-    with tqdm(total = 2000) as t:
-        while n < 2000:
+    with tqdm(total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))) as t: # total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT
+        while True: # n<1000, True
             t.update()
             ret, frame = cap.read()
             if not ret:
@@ -194,26 +298,77 @@ def estimate_camera_movement(game: str, prediction_dir: Path):
 
             ########################## 画像変換 ##########################
             # 現在のフレームをグレースケールに変換
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             # hsv変換
-            hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            # hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            # binary_frame = binary_kmeans(frame)
 
-            ########################## k-meansで5つのクラスタから二値化してエッジ検出 ##########################
-            '''edges = binary_kmeans(frame)
-            # 結果を動画として保存
-            output.write(edges)'''
+            ################ 広角か否かの判断 ################
+            # wide_angle_shot = Wide_Angle_Shot_with_Green(frame, hsv_frame)
+            if n % 15 == 0:
+                wide_angle_shot = Wide_Angle_Shot_with_Player_Bbox(frame)
+                prev_wide_angle_shot = wide_angle_shot
+            else:
+                wide_angle_shot = prev_wide_angle_shot
 
-            ########################## 緑の量から wide angle shot を推定 ##########################
-            wide_angle_shot = Wide_Angle_Shot_with_Green(frame, hsv_frame)
+            ################ 広角 ################
+            if wide_angle_shot:
+
+                ########################## フレームを引き延ばす #####################################
+                # 上半分のみ
+                # frame = stretch_to_square(frame)
+
+                # 全体的に
+                frame = stretch_frame(frame)
+
+                ########################## k-meansで5つのクラスタから二値化してエッジ検出 ##########################
+                # binary_frame = binary_kmeans(frame)
+
+                '''########################## 二値化された画像からオプティカルフローでカメラの動きを検出 ##########################
+                if prev_binary_frame is not None:
+                    flow = cv2.calcOpticalFlowFarneback(prev_binary_frame, binary_frame, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+                    prev_binary_frame = binary_frame
+                    # オプティカルフローを可視化
+                    binary_frame = draw_optical_flow(prev_binary_frame, flow)
+                    # オプティカルフローの結果からカメラの動きを計算（例：水平方向と垂直方向の移動量を計算）
+                    flow_mean = np.mean(flow, axis=(0, 1))
+                    camera_shift_x = flow_mean[0]
+                    camera_shift_y = flow_mean[1]
+                    # 結果を表示（または、他の方法でカメラの動きを利用）
+                    print(f"Frame {n}: Camera shift (x, y) = ({camera_shift_x:.2f}, {camera_shift_y:.2f})")
+                else:
+                    prev_binary_frame = binary_frame'''
+                
+                '''########################## オプティカルフローで移動量多い物体を検出 ##################################
+                # オプティカルフローを計算
+                if n == 0:
+                    prev_gray = binary_frame
+                    n += 1
+                    continue
+                flow = cv2.calcOpticalFlowFarneback(prev_gray, binary_frame, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+                prev_gray = binary_frame
+                # 移動量を計算
+                magnitude, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+                # 移動量が閾値を超える部分を抽出
+                movement_mask = magnitude > movement_threshold
+                # 移動量が大きい領域を強調表示
+                movement_frame = frame.copy()
+                movement_frame[movement_mask] = [0, 0, 255]  # 赤色で強調表示'''
+                
+                # 結果を動画として保存
+                output.write(frame) # movement_, binary_
+            
+            ################ 広角じゃない ################
+            else:
+                frame = add_black_to_square(frame)
+                output.write(frame)
+                # prev_binary_frame = None
 
             ########################## 線検出 ##########################
             '''detect_line(frame, hsv_frame)'''
 
             ########################## 特徴点検出 ##########################
             # p0 = cv2.goodFeaturesToTrack(gray, mask=None, **feature_params)
-
-            # 結果を動画として保存
-            output.write(frame)
 
             # 次のフレームのために現在のフレームを保存
             # prev_gray = gray.copy()
@@ -223,6 +378,13 @@ def estimate_camera_movement(game: str, prediction_dir: Path):
     cap.release()
     output.release()
     cv2.destroyAllWindows()
+
+    # H.264形式に変換
+    output_path = game_dir / f"propotional_square_video.mp4"
+    convert_to_h264(temp_output_path, output_path)
+
+    # 一時ファイルの削除（必要に応じて）
+    temp_output_path.unlink()
 
 
 def detect_fold(experiment: str, fold):

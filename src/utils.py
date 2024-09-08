@@ -57,12 +57,9 @@ def post_processing(frame_indexes: list[int],
                     gauss_sigma: float, # 3.0(default)
                     height: float, # 0.2(default)
                     distance: int) -> tuple[list[int], list[float]]: # 15(default)
-    print('predictions:', predictions)
     predictions = gaussian_filter(predictions, gauss_sigma)
-    print('gausian_predictions:', predictions)
     # 15フレームに一個ピークを見つけてる？
     peaks, _ = find_peaks(predictions, height=height, distance=distance)
-    print('peaks:', peaks)
     confidences = predictions[peaks].tolist()
     action_frame_indexes = (peaks + frame_indexes[0]).tolist()
     # action_frame_indexes でピークフレーム番号，confidences でピークにおける confidence を返す

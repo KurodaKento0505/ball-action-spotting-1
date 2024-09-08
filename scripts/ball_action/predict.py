@@ -11,7 +11,7 @@ from src.frame_fetchers import NvDecFrameFetcher
 from src.ball_action import constants
 
 
-RESOLUTION = "720p"
+RESOLUTION = "propotional_square_video"
 INDEX_SAVE_ZONE = 1
 TTA = True
 
@@ -88,7 +88,7 @@ def predict_video(predictor: MultiDimStackerPredictor,
     # 各クラスの開始時刻とその時の confidence を返す
     class2actions = raw_predictions_to_actions(frame_indexes, raw_predictions)
     
-    # 前後の認識した結果に制約条件を加えたい
+    '''# 前後の認識した結果に制約条件を加えたい
     changed_class2actions = {}
     for cls, cls_index in constants.class2target.items():
         frames, confidences = class2actions[cls]
@@ -131,8 +131,8 @@ def predict_video(predictor: MultiDimStackerPredictor,
         else:
             # 'DRIVE'や'OUT'以外のクラスはそのままコピー
             changed_class2actions[cls] = (frames, confidences)
-    # print('changed_class2actions:', changed_class2actions)
-    return changed_class2actions
+    # print('changed_class2actions:', changed_class2actions)'''
+    return class2actions # changed_
 
 
 def predict_game(predictor: MultiDimStackerPredictor,
