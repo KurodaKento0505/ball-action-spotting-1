@@ -43,7 +43,7 @@ def evaluate_predictions(experiment: str, fold: int, challenge: bool):
         SoccerNet_path=constants.soccernet_dir,
         Predictions_path=str(predictions_path),
         list_games=games,
-        prediction_file="results_spotting.json",
+        prediction_file="results_spotting.json", # _s
         label_files=constants.labels_filename,
         metric="at1",
         version=2, framerate=25,

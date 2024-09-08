@@ -370,6 +370,44 @@ def mask_frame(frame, results, prev_masked_x1, prev_masked_y1, prev_masked_x2, p
     return masked_frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2
 
 
+def mask_frame_with_confidence(frame, prev_ball_dict, next_ball_dict, n):
+    # フレームを黒くする
+    masked_frame = np.zeros_like(frame)
+    # フレーム番号を保存
+    prev_frame_num = prev_ball_dict['frame_number']
+    next_frame_num = next_ball_dict['frame_number']
+    central_frame_num = int((prev_frame_num + next_frame_num) / 2)
+    # prev と next の座標を保存
+    prev_x_center = int((prev_ball_dict['x_min'] + prev_ball_dict['x_max']) / 2)
+    prev_y_center = int((prev_ball_dict['y_min'] + prev_ball_dict['y_max']) / 2)
+    next_x_center = int((next_ball_dict['x_min'] + next_ball_dict['x_max']) / 2)
+    next_y_center = int((next_ball_dict['y_min'] + next_ball_dict['y_max']) / 2)
+    # 今のボールの位置を予測
+    n_x_center = ((n - prev_frame_num) * prev_x_center + (next_frame_num - n) * next_x_center) / (next_frame_num - prev_frame_num)
+    n_y_center = ((n - prev_frame_num) * prev_y_center + (next_frame_num - n) * next_y_center) / (next_frame_num - prev_frame_num)
+    # confidence > 0.8 の時のマスクの大きさ
+    default_size_x = 20
+    default_size_y = 20
+    # 1フレームあたりに拡張する大きさ
+    expand_x_per_frame = 1
+    expand_y_per_frame = 1
+    # 前半
+    if n < central_frame_num:
+        n_x_min = int(max(0, n_x_center - (default_size_x / 2 + (n - prev_frame_num) * expand_x_per_frame)))
+        n_y_min = int(max(0, n_y_center - (default_size_y / 2 + (n - prev_frame_num) * expand_y_per_frame)))
+        n_x_max = int(min(frame.shape[1], n_x_center + (default_size_x / 2 + (n - prev_frame_num) * expand_x_per_frame)))
+        n_y_max = int(min(frame.shape[0], n_y_center + (default_size_y / 2 + (n - prev_frame_num) * expand_y_per_frame)))
+        masked_frame[n_y_min:n_y_max, n_x_min:n_x_max] = frame[n_y_min:n_y_max, n_x_min:n_x_max]
+    # 後半
+    else:
+        n_x_min = int(max(0, n_x_center - (default_size_x / 2 + (next_frame_num - n) * expand_x_per_frame)))
+        n_y_min = int(max(0, n_y_center - (default_size_y / 2 + (next_frame_num - n) * expand_y_per_frame)))
+        n_x_max = int(min(frame.shape[1], n_x_center + (default_size_x / 2 + (next_frame_num - n) * expand_x_per_frame)))
+        n_y_max = int(min(frame.shape[0], n_y_center + (default_size_y / 2 + (next_frame_num - n) * expand_y_per_frame)))
+        masked_frame[n_y_min:n_y_max, n_x_min:n_x_max] = frame[n_y_min:n_y_max, n_x_min:n_x_max]
+    return masked_frame
+
+
 def detect_game(game: str,
                 prediction_dir: Path):
     game_dir = constants.soccernet_dir / game
@@ -380,126 +418,172 @@ def detect_game(game: str,
     video_info = get_video_info(video_path)
     print("Video info:", video_info)
     print("Detect video:", video_path)
+    ######################### change video path ############################
+    # video_path = 'data/tutorial/estimate_camera_movement/output_video.mp4'
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return
-    
-    n = 1
-
-    # YOLOv10モデルの読み込み
-    model_ball = YOLO("trained_model/yolov10_816.pt")
-    model_person = YOLO('trained_model/yolov8n.pt')
-    '''detection_model = AutoDetectionModel.from_pretrained(
-        model_type="yolov8",
-        model_path="trained_model/yolov10_816.pt",
-        confidence_threshold=0.3,
-        device="cuda:0",
-    )'''
 
     # 動画ライターの設定
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # コーデックの設定
     # output_path = game_dir / f"masked_video.{constants.videos_extension}"
     output_path = "data/tutorial/detections/output_video.mp4"
-    output = cv2.VideoWriter(str(output_path), fourcc, int(25), (int(1280), int(720)))  # 出力ファイル、フレームレート、フレームサイズを設定
-    
-    # 前のフレームのボール位置を初期化
-    prev_frame = None
-    prev_wide_angle_shot = False
-    prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = -1, -1, -1, -1
-    # 結果を保存するリスト
-    # ball_detections = []
-    wide_angle_changes = []
+    output = cv2.VideoWriter(str(output_path), fourcc, int(25), (int(1280), int(1280)))  # 1280, 720, 出力ファイル、フレームレート、フレームサイズを設定
 
-    # 物体検出した結果
+    # 何のループ回すか
+    easy_mask = True
 
+    ############################### 物体検出，マスクするためのループ ###############################
+    if easy_mask:
+        n = 1
+        # YOLOv10モデルの読み込み
+        model_ball = YOLO("trained_model/yolov10_816.pt")
+        model_person = YOLO('trained_model/yolov8n.pt')
+        '''detection_model = AutoDetectionModel.from_pretrained(
+            model_type="yolov8",
+            model_path="trained_model/yolov10_816.pt",
+            confidence_threshold=0.3,
+            device="cuda:0",
+        )'''
+        # 前のフレームのボール位置を初期化
+        prev_frame = None
+        prev_wide_angle_shot = False
+        prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = -1, -1, -1, -1
+        # 結果を保存するリストs
+        # ball_detections = []
+        wide_angle_changes = []
 
-    with tqdm(total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))) as t: # total=1000
-        while True: # n < 1000:
-            t.update()
-            ret, frame = cap.read()
-            if ret:
-                ################ 画像変換 ###################
-                # グレースケール変換
-                # gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                # hsv変換
-                # hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        with tqdm(total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))) as t: # total=1000
+            while True: # n < 1000:
+                t.update()
+                ret, frame = cap.read()
+                if ret:
+                    ################ 画像変換 ###################
+                    # グレースケール変換
+                    # gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    # hsv変換
+                    # hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-                ################ 広角か否かの判断 ################
-                # wide_angle_shot = Wide_Angle_Shot_with_Green(frame, hsv_frame)
-                if n % 15 == 0:
-                    wide_angle_shot = Wide_Angle_Shot_with_Player_Bbox(frame)
-                    # prev_wide_angle_shot = wide_angle_shot
-                else:
-                    wide_angle_shot = prev_wide_angle_shot
-                
-                # 広角ショットの切り替えを記録
-                if wide_angle_shot != prev_wide_angle_shot:
-                    if wide_angle_shot:
-                        binary_wide_angle_shot = 0
+                    ################ 広角か否かの判断 ################
+                    # wide_angle_shot = Wide_Angle_Shot_with_Green(frame, hsv_frame)
+                    if n % 15 == 0:
+                        wide_angle_shot = Wide_Angle_Shot_with_Player_Bbox(frame)
+                        # prev_wide_angle_shot = wide_angle_shot
                     else:
-                        binary_wide_angle_shot = 1
-                    wide_angle_changes.append({
-                        "frame_number": n,
-                        "wide_angle": binary_wide_angle_shot
-                    })
-                prev_wide_angle_shot = wide_angle_shot
+                        wide_angle_shot = prev_wide_angle_shot
+                    
+                    '''# 広角ショットの切り替えを記録
+                    if wide_angle_shot != prev_wide_angle_shot:
+                        if wide_angle_shot:
+                            binary_wide_angle_shot = 0
+                        else:
+                            binary_wide_angle_shot = 1
+                        wide_angle_changes.append({
+                            "frame_number": n,
+                            "wide_angle": binary_wide_angle_shot
+                        })
+                    prev_wide_angle_shot = wide_angle_shot'''
 
-                ################ 広角 ################
-                if wide_angle_shot:
+                    ################ 広角 ################
+                    if wide_angle_shot:
 
-                    ############### 画像を切り取る ###################
-                    # cut_frame(frame)
+                        ############### 画像を切り取る ###################
+                        # cut_frame(frame)
 
-                    ################ 物体検出 ################
-                    # YOLOv10で物体検出
-                    # results_ball = model_ball(frame) # frame, center_frame, filtered_frame
+                        ################ 物体検出 ################
+                        # YOLOv10で物体検出
+                        results_ball = model_ball(frame) # frame, center_frame, filtered_frame
+                        draw_bbox(frame, results_ball)
+                        # SAHI
+                        '''results_ball = get_sliced_prediction(
+                            frame,
+                            detection_model,
+                            slice_height=200,
+                            slice_width=200,
+                            overlap_height_ratio=0.2,
+                            overlap_width_ratio=0.2,
+                        )
+                        draw_bbox_SAHI(frame, results_ball)'''
+                        # 検出結果をjsonで保存
+                        # results_to_json(results_ball, n, ball_detections)
+                        # jsonから読み取る
+
+                        ################ マスクかける ################
+                        # frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = mask_frame(frame, results_ball, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2)
+                        # cut
+                        # frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = cut_frame(frame, results_ball, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2)
+                        # マスクした後に物体検出
+                        # results_ball = model_ball(frame)
+                        # results_person = model_person.track(frame)
+                        # draw_bbox(frame, results_ball, 'ball')
+                        # draw_bbox(frame, results_person, Track=True)
+                        
+                    ################ 広角じゃない ################
+                    else:
+                        prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = -1, -1, -1, -1
+                    
                     # draw_bbox(frame, results_ball)
-                    # SAHI
-                    '''results_ball = get_sliced_prediction(
-                        frame,
-                        detection_model,
-                        slice_height=200,
-                        slice_width=200,
-                        overlap_height_ratio=0.2,
-                        overlap_width_ratio=0.2,
-                    )
-                    draw_bbox_SAHI(frame, results_ball)'''
-                    # 検出結果をjsonで保存
-                    # results_to_json(results_ball, n, ball_detections)
-                    # jsonから読み取る
+                    ################ 物体追跡 ################
+                    # tracking(frame, results)
 
-                    ################ マスクかける ################
-                    # frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = mask_frame(frame, results_ball, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2)
-                    # cut
-                    # frame, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = cut_frame(frame, results_ball, prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2)
-                    # results_ball = model_ball(frame)
-                    # results_person = model_person.track(frame)
-                    # draw_bbox(frame, results_ball, 'ball')
-                    # draw_bbox(frame, results_person, Track=True)
-                    # cv2.putText(frame, "Wide Angle Shot", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
-                
-                ################ 広角じゃない ################
+                    # 動画にフレームを追加
+                    output.write(frame)
+                    n += 1
+                    # break
                 else:
-                    prev_masked_x1, prev_masked_y1, prev_masked_x2, prev_masked_y2 = -1, -1, -1, -1
-                
-                # draw_bbox(frame, results_ball)
-                ################ 物体追跡 ################
-                # tracking(frame, results)
+                    break
+        
+        '''with open(game_dir / f"wide_angle_changes.json", 'w') as f:
+            json.dump(wide_angle_changes, f, indent=4)'''
 
-                # 動画にフレームを追加
-                # output.write(frame)
-                n += 1
-                # break
-            else:
-                break
+        # 動画ファイルを閉じる
+        cap.release()
+        output.release()
+        cv2.destroyAllWindows()
     
-    with open(game_dir / f"wide_angle_changes.json", 'w') as f:
-        json.dump(wide_angle_changes, f, indent=4)
-
-    # 動画ファイルを閉じる
-    cap.release()
-    # output.release()
-    # cv2.destroyAllWindows()
+    ############################### 0.8以上のbboxを頼りにマスクかける ###############################
+    else:
+        # ball_detectionのファイルとwide_angle_changeのファイルを参照
+        json_open_ball = open(game_dir / f"ball_detection.json", 'r')
+        ball_detection_list = json.load(json_open_ball)
+        json_open_wide_angle = open(game_dir / f"wide_angle_changes.json", 'r')
+        wide_angle_list = json.load(json_open_wide_angle)
+        # ループ
+        n = 0
+        num_ball_detection = 0
+        num_wide_angle = 0
+        prev_ball_dict = {}
+        with tqdm(total=1000) as t: # total=1000, total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            while n < 1000: # n < 1000, True
+                t.update()
+                ret, frame = cap.read()
+                if ret:
+                    # confidence >= 0.8でボールを検出したフレーム
+                    if n == ball_detection_list[num_ball_detection]['frame_number']:
+                        prev_ball_dict = ball_detection_list[num_ball_detection]
+                        # 次のconfidence >= 0.8でボールを検出したフレームと広角じゃなくなるフレームのどちらが先に訪れるか
+                        # 先にconfidence >= 0.8でボールを検出したフレームが来る場合
+                        if wide_angle_list[2 * num_wide_angle + 1]['frame_number'] > ball_detection_list[num_ball_detection + 1]['frame_number']:
+                            next_ball_dict = ball_detection_list[num_ball_detection + 1]
+                        # 先に広角じゃなくなるフレームが来る場合
+                        else:
+                            prev_ball_dict = {}
+                            num_wide_angle += 1
+                        num_ball_detection += 1
+                    
+                    # prev_ball_dictが空かどうか，空＝一回画角変わる
+                    # prev_ball_dictが空じゃない
+                    if any(prev_ball_dict) == True:
+                        # マスクかける
+                        frame = mask_frame_with_confidence(frame, prev_ball_dict, next_ball_dict, n)
+                    # 動画にフレームを追加
+                    output.write(frame)
+                    n += 1
+                else:
+                    break
+        # 動画ファイルを閉じる
+        cap.release()
+        output.release()
 
 
 def detect_fold(experiment: str, fold):

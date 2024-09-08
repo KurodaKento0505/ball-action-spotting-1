@@ -11,7 +11,7 @@ from src.frame_fetchers import NvDecFrameFetcher
 from src.ball_action import constants
 
 
-RESOLUTION = "720p"
+RESOLUTION = "propotional_square_video"
 INDEX_SAVE_ZONE = 1
 TTA = True
 
